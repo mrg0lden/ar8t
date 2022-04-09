@@ -1,6 +1,8 @@
 package ar8t
 
-import "errors"
+import (
+	"errors"
+)
 
 type BlockInfo struct {
 	BlockCount        byte
@@ -13,7 +15,7 @@ var (
 	errInvalidECLevel     = errors.New("ar8t: invalid error correction level")
 )
 
-func GetBlockInfo(version int, level ECLevel) ([]BlockInfo, error) {
+func GetBlockInfo(version uint32, level ECLevel) ([]BlockInfo, error) {
 	if version < 1 || version > 40 {
 		return nil, errUnsupportedVersion
 	}
@@ -21,27 +23,48 @@ func GetBlockInfo(version int, level ECLevel) ([]BlockInfo, error) {
 	if level < ECLevelLow || level > ECLevelHigh {
 		return nil, errInvalidECLevel
 	}
-	return levelsBlockInfo[version][level], nil
+
+	infoExpanded := []BlockInfo{}
+
+	blockInfo := levelsBlockInfo[version][level]
+
+	for _, bi := range blockInfo {
+		for i := byte(0); i < bi.BlockCount; i++ {
+			infoExpanded = append(infoExpanded, bi)
+		}
+	}
+
+	return infoExpanded, nil
 }
 
-var levelsBlockInfo = map[int]map[ECLevel][]BlockInfo{
-	1: {ECLevelLow: {{1, 26, 19, 2}},
+var levelsBlockInfo = map[uint32]map[ECLevel][]BlockInfo{
+	1: {
+		ECLevelLow:      {{1, 26, 19, 2}},
 		ECLevelMedium:   {{1, 26, 16, 4}},
 		ECLevelQuartile: {{1, 26, 13, 6}},
 		ECLevelHigh:     {{1, 26, 9, 8}},
 	},
-	2: {ECLevelLow: {{1, 44, 34, 4}},
+
+	2: {
+		ECLevelLow:      {{1, 44, 34, 4}},
 		ECLevelMedium:   {{1, 44, 28, 8}},
 		ECLevelQuartile: {{1, 44, 22, 11}},
-		ECLevelHigh:     {{1, 44, 16, 14}}},
-	3: {ECLevelLow: {{1, 70, 55, 7}},
+		ECLevelHigh:     {{1, 44, 16, 14}},
+	},
+
+	3: {
+		ECLevelLow:      {{1, 70, 55, 7}},
 		ECLevelMedium:   {{1, 70, 44, 13}},
 		ECLevelQuartile: {{2, 35, 17, 9}},
-		ECLevelHigh:     {{2, 35, 13, 11}}},
-	4: {ECLevelLow: {{1, 100, 80, 10}},
+		ECLevelHigh:     {{2, 35, 13, 11}},
+	},
+
+	4: {
+		ECLevelLow:      {{1, 100, 80, 10}},
 		ECLevelMedium:   {{2, 50, 32, 9}},
 		ECLevelQuartile: {{2, 50, 24, 13}},
-		ECLevelHigh:     {{4, 25, 9, 8}}},
+		ECLevelHigh:     {{4, 25, 9, 8}},
+	},
 
 	5: {
 		ECLevelLow:    {{1, 134, 108, 13}},
@@ -55,12 +78,14 @@ var levelsBlockInfo = map[int]map[ECLevel][]BlockInfo{
 			{2, 34, 12, 11},
 		},
 	},
+
 	6: {
 		ECLevelLow:      {{2, 86, 68, 9}},
 		ECLevelMedium:   {{4, 43, 27, 8}},
 		ECLevelQuartile: {{4, 43, 19, 12}},
 		ECLevelHigh:     {{4, 43, 15, 14}},
 	},
+
 	7: {
 		ECLevelLow:    {{2, 98, 78, 10}},
 		ECLevelMedium: {{4, 49, 31, 9}},
@@ -73,6 +98,7 @@ var levelsBlockInfo = map[int]map[ECLevel][]BlockInfo{
 			{1, 40, 14, 13},
 		},
 	},
+
 	8: {
 		ECLevelLow: {{2, 121, 97, 12}},
 		ECLevelMedium: {
@@ -88,6 +114,7 @@ var levelsBlockInfo = map[int]map[ECLevel][]BlockInfo{
 			{2, 41, 15, 13},
 		},
 	},
+
 	9: {
 		ECLevelLow: {{2, 146, 116, 15}},
 		ECLevelMedium: {
@@ -103,6 +130,7 @@ var levelsBlockInfo = map[int]map[ECLevel][]BlockInfo{
 			{4, 37, 13, 12},
 		},
 	},
+
 	10: {
 		ECLevelLow: {
 			{2, 86, 68, 9},
@@ -121,6 +149,7 @@ var levelsBlockInfo = map[int]map[ECLevel][]BlockInfo{
 			{2, 44, 16, 14},
 		},
 	},
+
 	11: {
 		ECLevelLow: {{4, 101, 81, 10}},
 		ECLevelMedium: {
@@ -136,6 +165,7 @@ var levelsBlockInfo = map[int]map[ECLevel][]BlockInfo{
 			{8, 37, 13, 12},
 		},
 	},
+
 	12: {
 		ECLevelLow: {
 			{2, 116, 92, 12},
@@ -154,6 +184,7 @@ var levelsBlockInfo = map[int]map[ECLevel][]BlockInfo{
 			{4, 43, 15, 14},
 		},
 	},
+
 	13: {
 		ECLevelLow: {{4, 133, 107, 13}},
 		ECLevelMedium: {

@@ -20,11 +20,11 @@ var _ Detector = LineScan{}
 type LineScan struct{}
 
 type QRFinderPosition struct {
-	Location                   image.Point
+	Location                   Point
 	ModuleSize, LastModuleSize float64
 }
 
-type refineFunc = func(*image.Gray, image.Point, float64) (QRFinderPosition, bool)
+type refineFunc = func(*image.Gray, Point, float64) (QRFinderPosition, bool)
 
 func (s LineScan) Detect(prepared *image.Gray) []QRLocation {
 	// The order of refinement is important.
@@ -46,14 +46,14 @@ func (s LineScan) Detect(prepared *image.Gray) []QRLocation {
 	for y := 0; y < prepared.Rect.Dy(); y++ {
 	pixels:
 		for x := 0; x < prepared.Rect.Dx(); x++ {
-			p := prepared.GrayAt(x, y)
+			p := prepared.GrayAt(x, y).Y
 			// a new line, make a new QRFinderPattern
 			if x == 0 {
 				lastPixel = 127
 				pattern = QRFinderPattern{}
 			}
 
-			if p.Y == lastPixel {
+			if p == lastPixel {
 				pattern[6] += 1
 
 				if x != prepared.Rect.Dx()-1 {
@@ -62,21 +62,21 @@ func (s LineScan) Detect(prepared *image.Gray) []QRLocation {
 			}
 
 			if !pattern.LooksLikeFinder() {
-				lastPixel = p.Y
+				lastPixel = p
 				pattern.Slide()
 				continue
 			}
 
 			moduleSize := pattern.EstimateModuleSize()
 
-			finder := image.Point{
-				X: x - int(moduleSize*3.5),
-				Y: y,
+			finder := Point{
+				X: float64(x) - moduleSize*3.5,
+				Y: float64(y),
 			}
 
 			for _, candidate := range candidates {
 				if distance(finder, candidate.Location) < 7*moduleSize {
-					lastPixel = p.Y
+					lastPixel = p
 					pattern.Slide()
 					continue pixels
 				}
@@ -86,7 +86,7 @@ func (s LineScan) Detect(prepared *image.Gray) []QRLocation {
 				vert, ok := refineFunc.refineFunc(prepared, finder, moduleSize)
 
 				if !ok {
-					lastPixel = p.Y
+					lastPixel = p
 					pattern.Slide()
 
 					continue pixels
@@ -94,8 +94,8 @@ func (s LineScan) Detect(prepared *image.Gray) []QRLocation {
 
 				if !refineFunc.isDiagonal {
 					halfFinder := vert.LastModuleSize * 3.5
-					finder.X = int(float64(vert.Location.X) - refineFunc.dx*halfFinder)
-					finder.Y = int(float64(vert.Location.Y) - refineFunc.dy*halfFinder)
+					finder.X = vert.Location.X - refineFunc.dx*halfFinder
+					finder.Y = vert.Location.Y - refineFunc.dy*halfFinder
 					moduleSize = vert.ModuleSize
 				}
 			}
@@ -106,7 +106,7 @@ func (s LineScan) Detect(prepared *image.Gray) []QRLocation {
 				LastModuleSize: 0,
 			})
 
-			lastPixel = p.Y
+			lastPixel = p
 			pattern.Slide()
 
 		}
@@ -138,7 +138,7 @@ func (s LineScan) Detect(prepared *image.Gray) []QRLocation {
 				}
 
 				if loc, ok := findQR(
-					[...]image.Point{
+					[...]Point{
 						candidates[candidate1].Location,
 						candidates[candidate2].Location,
 						candidates[candidate3].Location,
@@ -156,30 +156,28 @@ func (s LineScan) Detect(prepared *image.Gray) []QRLocation {
 
 }
 
-func refineHorizontal(prepared *image.Gray, finder image.Point, moduleSize float64) (QRFinderPosition, bool) {
+func refineHorizontal(prepared *image.Gray, finder Point, moduleSize float64) (QRFinderPosition, bool) {
 	startX := refineCalcStart(finder.X, moduleSize)
-	endX := refineCalcEnd(finder.Y, prepared.Rect.Dx(), moduleSize)
+	endX := refineCalcEnd(finder.X, uint32(prepared.Rect.Dx()), moduleSize)
 
-	rangeX := _range[uint32]{startX, endX}.Iter()
-	rangeY := repeatIter[uint32]{uint32(finder.Y)}
+	y := uint32(math.Round(finder.Y))
 
-	return refine(prepared, moduleSize, rangeX, rangeY, false)
+	return refine(prepared, moduleSize, startX, endX, y, y, false)
 
 }
 
-func refineVertical(prepared *image.Gray, finder image.Point, moduleSize float64) (QRFinderPosition, bool) {
+func refineVertical(prepared *image.Gray, finder Point, moduleSize float64) (QRFinderPosition, bool) {
 	startY := refineCalcStart(finder.Y, moduleSize)
-	endY := refineCalcEnd(finder.Y, prepared.Rect.Dy(), moduleSize)
+	endY := refineCalcEnd(finder.Y, uint32(prepared.Rect.Dy()), moduleSize)
 
-	rangeX := repeatIter[uint32]{uint32(finder.X)}
-	rangeY := _range[uint32]{startY, endY}.Iter()
+	x := uint32(math.Round(finder.X))
 
-	return refine(prepared, moduleSize, rangeX, rangeY, false)
+	return refine(prepared, moduleSize, x, x, startY, endY, false)
 }
 
-func refineDiagonal(prepared *image.Gray, finder image.Point, moduleSize float64) (QRFinderPosition, bool) {
-	side := int(5 * moduleSize)
-	var startX, startY int
+func refineDiagonal(prepared *image.Gray, finder Point, moduleSize float64) (QRFinderPosition, bool) {
+	side := 5 * moduleSize
+	var startX, startY float64
 
 	switch {
 	case finder.X < side && finder.Y < side:
@@ -197,61 +195,77 @@ func refineDiagonal(prepared *image.Gray, finder image.Point, moduleSize float64
 		startY = finder.Y - side
 	}
 
-	rangeEndCalc := func(v, d int) uint32 {
-		return uint32(min(v+int(side), d))
+	rangeEndCalc := func(v, d float64) uint32 {
+		return uint32(math.Round(min(v+side, d)))
 	}
 
-	rangeX := _range[uint32]{uint32(startX),
-		rangeEndCalc(finder.X, prepared.Rect.Dx())}.Iter()
-	rangeY := _range[uint32]{uint32(startY),
-		rangeEndCalc(finder.Y, prepared.Rect.Dy())}.Iter()
+	xMin, xMax := uint32(math.Round(startX)),
+		rangeEndCalc(finder.X, float64(prepared.Rect.Dx()))
 
-	return refine(prepared, moduleSize, rangeX, rangeY, true)
+	yMin, yMax := uint32(math.Round(startY)),
+		rangeEndCalc(finder.Y, float64(prepared.Rect.Dy()))
+
+	return refine(prepared, moduleSize, xMin, xMax, yMin, yMax, true)
 
 }
 
-func refine(prepared *image.Gray, moduleSize float64, xRange, yRange Iterator[uint32], isDiagonal bool) (QRFinderPosition, bool) {
+func refine(prepared *image.Gray, moduleSize float64, xMin, xMax, yMin, yMax uint32, isDiagonal bool) (QRFinderPosition, bool) {
 	var (
 		lastPixel    uint8 = 127
 		pattern            = QRFinderPattern{}
 		lastX, lastY uint32
 	)
 
-	zIter := zip(xRange, yRange)
+	x, y := xMin, yMin
 
-	for zIter.Next() {
-		x, y := zIter.Value()
-		p := prepared.GrayAt(int(x), int(y))
+	for {
+
+		p := prepared.GrayAt(int(x), int(y)).Y
 
 		switch {
-		case p.Y == lastPixel:
+		case p == lastPixel:
 			pattern[6]++
 		case pattern.LooksLikeFinder() &&
 			(diff(moduleSize, pattern.EstimateModuleSize()) < 0.2 || isDiagonal):
 			newEstModSize := (moduleSize + pattern.EstimateModuleSize()) / 2
 			return QRFinderPosition{
-				Location: image.Point{
-					X: int(x),
-					Y: int(y),
+				Location: Point{
+					X: float64(x),
+					Y: float64(y),
 				},
 				ModuleSize:     newEstModSize,
 				LastModuleSize: pattern.EstimateModuleSize(),
 			}, true
 		default:
-			lastPixel = p.Y
+			lastPixel = p
 			pattern.Slide()
 		}
 
 		lastX, lastY = x, y
+
+		switch {
+		case isDiagonal && x < xMax-1 && y < yMax-1:
+			x++
+			y++
+			continue
+		case !isDiagonal && xMin == xMax && y < yMax-1:
+			y++
+			continue
+		case !isDiagonal && yMin == yMax && x < xMax-1:
+			x++
+			continue
+		}
+
+		break
 	}
 
 	if pattern.LooksLikeFinder() &&
 		(diff(moduleSize, pattern.EstimateModuleSize()) < 0.2 || isDiagonal) {
 		newEstModSize := (moduleSize + pattern.EstimateModuleSize()) / 2
 		return QRFinderPosition{
-			Location: image.Point{
-				X: int(lastX),
-				Y: int(lastY),
+			Location: Point{
+				X: float64(lastX),
+				Y: float64(lastY),
 			},
 			ModuleSize:     newEstModSize,
 			LastModuleSize: pattern.EstimateModuleSize(),
@@ -261,7 +275,7 @@ func refine(prepared *image.Gray, moduleSize float64, xRange, yRange Iterator[ui
 	return QRFinderPosition{}, false
 }
 
-type QRFinderPattern [7]uint32
+type QRFinderPattern [7]uint
 
 func (p *QRFinderPattern) Slide() {
 	if float64(p[6]) < float64(p[5])/10 && p[4] != 0 {
@@ -298,9 +312,18 @@ func (p *QRFinderPattern) LooksLikeFinder() bool {
 	moduleSize := float64(totalSize) / 7
 	maxVariance := moduleSize / 1.5
 
-	check := func(v ...uint32) bool {
-		for _, val := range v {
-			if moduleSize-math.Abs(float64(val)) > maxVariance {
+	check := func(v ...uint) bool {
+		for i, val := range v {
+			// p[4] special case
+			// not good code tbh
+			if i == 2 {
+				if math.Abs(moduleSize*3-float64(val)) > maxVariance {
+					return false
+				}
+
+				continue
+			}
+			if math.Abs(moduleSize-float64(val)) > maxVariance {
 				return false
 			}
 		}
@@ -318,34 +341,36 @@ func diff(a, b float64) float64 {
 	return (b - a) / b
 }
 
-func distance(a, b image.Point) float64 {
-	dist := math.Pow(float64(a.X-b.X), 2) + math.Pow(float64(a.Y-b.Y), 2)
+func distance(a, b Point) float64 {
+	// square of diff
+	dist := float64(a.X-b.X)*float64(a.X-b.X) +
+		float64(a.Y-b.Y)*float64(a.Y-b.Y)
 	return math.Sqrt(dist)
 }
 
-func refineCalcStart(v int, moduleSize float64) uint32 {
-	return uint32(math.Round(max(float64(v-5)*moduleSize, 0)))
+func refineCalcStart(v, moduleSize float64) uint32 {
+	return uint32(math.Round(max(v-5*moduleSize, 0)))
 }
 
-func refineCalcEnd(v, d int, moduleSize float64) uint32 {
+func refineCalcEnd(v float64, d uint32, moduleSize float64) uint32 {
 	return min(
-		uint32(math.Round(float64(v+5)*moduleSize)),
-		uint32(d),
+		uint32(math.Round(v+5*moduleSize)),
+		d,
 	)
 }
 
-func findQR(p [3]image.Point, moduleSize float64) (QRLocation, bool) {
-	loc, ok := findQRInternal([...]image.Point{p[0], p[1], p[2]}, moduleSize)
+func findQR(p [3]Point, moduleSize float64) (QRLocation, bool) {
+	loc, ok := findQRInternal([...]Point{p[0], p[1], p[2]}, moduleSize)
 	if ok {
 		return loc, ok
 	}
 
-	loc, ok = findQRInternal([...]image.Point{p[1], p[0], p[2]}, moduleSize)
+	loc, ok = findQRInternal([...]Point{p[1], p[0], p[2]}, moduleSize)
 	if ok {
 		return loc, ok
 	}
 
-	loc, ok = findQRInternal([...]image.Point{p[2], p[0], p[1]}, moduleSize)
+	loc, ok = findQRInternal([...]Point{p[2], p[0], p[1]}, moduleSize)
 	if ok {
 		return loc, ok
 	}
@@ -353,7 +378,7 @@ func findQR(p [3]image.Point, moduleSize float64) (QRLocation, bool) {
 	return QRLocation{}, false
 }
 
-func findQRInternal(p [3]image.Point, moduleSize float64) (QRLocation, bool) {
+func findQRInternal(p [3]Point, moduleSize float64) (QRLocation, bool) {
 	var (
 		ax = p[1].X - p[0].X
 		ay = p[1].Y - p[0].Y
@@ -362,9 +387,9 @@ func findQRInternal(p [3]image.Point, moduleSize float64) (QRLocation, bool) {
 	)
 
 	var (
-		crossProduct = -1 * float64(ax*by-ay*bx)
-		lenA         = math.Sqrt(float64(ax*ax + ay*ay))
-		lenB         = math.Sqrt(float64(bx*bx + by*by))
+		crossProduct = -(ax*by - ay*bx)
+		lenA         = math.Sqrt(ax*ax + ay*ay)
+		lenB         = math.Sqrt(bx*bx + by*by)
 	)
 
 	if diff(lenA, lenB) > 0.15 {
@@ -376,7 +401,7 @@ func findQRInternal(p [3]image.Point, moduleSize float64) (QRLocation, bool) {
 		return QRLocation{}, false
 	}
 
-	dist := uint32(distance(p[0], p[2])/moduleSize + 7)
+	dist := uint32(math.Round(distance(p[0], p[2])/moduleSize + 7))
 
 	if dist < 20 {
 		return QRLocation{}, false

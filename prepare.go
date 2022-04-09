@@ -136,8 +136,8 @@ func asBlockCoords(w, h int, s BlockSize) (x, y BlockCoord) {
 	return
 }
 
-func toIndex(coordX, coordY, w BlockCoord) int {
-	return int(coordY*(w+1) + coordX)
+func toIndex(coordX, coordY, w BlockCoord) uint32 {
+	return uint32(coordY*(w+1) + coordX)
 }
 
 type BlockCoord uint32
