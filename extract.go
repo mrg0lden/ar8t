@@ -238,8 +238,7 @@ func isAlignment(prepared *image.Gray, p, dx, dy Point, scale float64) bool {
 			return false
 		}
 
-		// different from the original source code, might be wrong?
-		right := p.Add(dx).Sub(dy.Mul(float64(y)))
+		right := p.Sub(dx).Add(dy.Mul(float64(y)))
 		if prepared.GrayAt(int(math.Round(right.X)), int(math.Round(right.Y))).Y == 0 {
 			return false
 		}
